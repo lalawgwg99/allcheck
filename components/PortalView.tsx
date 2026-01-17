@@ -29,7 +29,9 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
       setHasConfig(true);
       setStoreName(config.storeName || '我的團隊');
       // Auto-sync on load to ensure data is fresh (Device Switch Support)
-      handleSync(true);
+      if (config.apiKey !== 'local') {
+          handleSync(true);
+      }
     }
     
     // Auto-fill last used name
@@ -61,29 +63,7 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
     }
 
     // Enter
-    window.location.hash = '#task/dashboard'; // Assuming employee view logic handles this or we redirect
-    // Small hack: Trigger a re-render/navigation in App.tsx by changing hash
-    // We actually want to go to the employee's view logic.
-    // Let's stick to the previous pattern: Select Employee -> Show Dashboard
-    
-    // Since App.tsx handles routing based on hash, we need to handle "Login" state there or here.
-    // To keep it simple "Google Meet" style:
-    // This Component (PortalView) is the "Lobby". Once joined, we switch the URL.
-    
-    // Find a pending task for this user or go to their list
-    const myTasks = tasks.filter(t => t.assigneeName === myName.trim() && t.status === 'pending');
-    if (myTasks.length > 0) {
-        window.location.hash = `#task/${myTasks[0].id}`;
-    } else {
-        // No specific task? Go to a generic list view or stay here?
-        // Let's create a generic "My List" route in App.tsx later, 
-        // For now, let's use a special hash or just handle state in App. 
-        // actually, let's just trigger the 'employee' view in this component if we want, 
-        // OR better: redirect to a "personal dashboard"
-        
-        // Let's redirect to the "EmployeeDashboard" (we need to create/update App.tsx to support #list/EmployeeName)
-        window.location.hash = `#list/${encodeURIComponent(myName.trim())}`;
-    }
+    window.location.hash = `#list/${encodeURIComponent(myName.trim())}`;
   };
 
   const handleAdminLogin = () => {
@@ -114,27 +94,10 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
                 </div>
                 <h1 className="text-2xl font-bold tracking-tight mb-1">{storeName}</h1>
                 <p className="text-slate-400 text-sm flex items-center justify-center gap-2">
-                   {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-emerald-500"></div>}
-                   {isSyncing ? '同步資料中...' : '系統已連線'}
+                   {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className={`w-2 h-2 rounded-full ${getCloudConfig()?.apiKey === 'local' ? 'bg-amber-500' : 'bg-emerald-500'}`}></div>}
+                   {isSyncing ? '同步資料中...' : getCloudConfig()?.apiKey === 'local' ? '本機模式 (尚未連線雲端)' : '系統已連線'}
                 </p>
              </div>
-             
-             {/* Invite Link Button (Tiny) */}
-             <button 
-                onClick={() => {
-                   const config = getCloudConfig();
-                   if(config) {
-                      const code = encodeCloudConfig(config);
-                      const url = `${window.location.origin}${window.location.pathname}#invite=${code}`;
-                      navigator.clipboard.writeText(url);
-                      alert("連結已複製！請傳送給其他裝置或員工。");
-                   }
-                }}
-                className="absolute top-4 right-4 p-2 text-white/50 hover:text-white bg-white/5 rounded-full hover:bg-white/20 transition-all"
-                title="複製邀請連結"
-             >
-                <Link className="w-4 h-4" />
-             </button>
           </div>
 
           {/* Login Body */}
@@ -195,7 +158,7 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
                             onChange={e => { setAdminPwdInput(e.target.value); setLoginError(''); }}
                             onKeyDown={e => e.key === 'Enter' && handleAdminLogin()}
                             className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 text-lg font-bold tracking-widest"
-                            placeholder="••••"
+                            placeholder="預設為 admin"
                          />
                       </div>
                    </div>
@@ -218,32 +181,31 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
 
 // --- Create Space Wizard ---
 const CreateSpaceWizard: React.FC = () => {
-    const [step, setStep] = useState(1);
     const [storeName, setStoreName] = useState('');
-    const [apiKey, setApiKey] = useState('');
-    const [adminPwd, setAdminPwd] = useState('');
     const [loading, setLoading] = useState(false);
 
     const handleCreate = async () => {
-        if (!storeName || !apiKey || !adminPwd) {
-            alert("請填寫所有欄位");
+        if (!storeName) {
+            alert("請設定店鋪名稱");
             return;
         }
         setLoading(true);
         
         // 1. Prepare Initial Data
         const initialData = getFullSystemData();
-        initialData.adminPassword = adminPwd;
+        // DEFAULT ADMIN PASSWORD
+        const defaultPwd = 'admin';
+        initialData.adminPassword = defaultPwd;
         
-        // 2. Create Cloud Store
-        const config = await createCloudStore(apiKey.trim(), initialData, storeName.trim());
+        // 2. Create LOCAL Config (Bypass Cloud for now)
+        const config = await createCloudStore('local', initialData, storeName.trim());
         
         if (config) {
             saveCloudConfig(config);
-            saveAdminPassword(adminPwd);
+            saveAdminPassword(defaultPwd);
+            // DIRECT ENTRY
+            window.location.hash = '#dashboard';
             window.location.reload();
-        } else {
-            alert("建立失敗，請檢查 API Key (Master Key)");
         }
         setLoading(false);
     };
@@ -258,37 +220,30 @@ const CreateSpaceWizard: React.FC = () => {
                 </div>
                 
                 <div className="space-y-2">
-                   <h1 className="text-3xl font-bold text-slate-900">建立您的工作空間</h1>
-                   <p className="text-slate-500">只需設定一次，之後分享連結即可。</p>
+                   <h1 className="text-3xl font-bold text-slate-900">歡迎使用 UniCheck</h1>
+                   <p className="text-slate-500">免註冊，3 秒鐘立即建立工作環境。</p>
                 </div>
 
                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 text-left space-y-4">
                     <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">團隊名稱</label>
-                        <input className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
-                           placeholder="例如：台北一店" value={storeName} onChange={e => setStoreName(e.target.value)} />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">管理員密碼 (您自己要記住)</label>
-                        <input className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
-                           placeholder="設定後台密碼" value={adminPwd} onChange={e => setAdminPwd(e.target.value)} />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">伺服器金鑰 (JSONBin Master Key)</label>
-                        <input className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-xs" 
-                           placeholder="$2a$10$..." value={apiKey} onChange={e => setApiKey(e.target.value)} />
-                        <div className="mt-2 text-xs text-slate-400">
-                           <a href="https://jsonbin.io/app/keys" target="_blank" className="text-indigo-600 underline">按此取得免費金鑰</a> (需要註冊 JSONBin)
-                        </div>
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-1">團隊/店鋪名稱</label>
+                        <input 
+                           className="w-full p-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-lg font-medium" 
+                           placeholder="例如：台北一店" 
+                           value={storeName} 
+                           onChange={e => setStoreName(e.target.value)}
+                           onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                           autoFocus 
+                        />
                     </div>
                 </div>
 
                 <button 
                    onClick={handleCreate}
                    disabled={loading}
-                   className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-all flex justify-center items-center"
+                   className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold text-lg shadow-xl hover:bg-slate-800 transition-all flex justify-center items-center"
                 >
-                   {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : '建立並開始使用'}
+                   {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : '建立並直接進入'}
                 </button>
             </div>
         </div>

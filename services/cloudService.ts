@@ -28,6 +28,16 @@ export const decodeCloudConfig = (code: string): CloudConfig | null => {
 
 // Create a new Bin (Store)
 export const createCloudStore = async (apiKey: string, data: SystemData, storeName: string): Promise<CloudConfig | null> => {
+  // --- LOCAL MODE BYPASS ---
+  if (apiKey === 'local') {
+      return {
+          binId: 'local-' + Date.now(),
+          apiKey: 'local',
+          storeName: storeName
+      };
+  }
+  // -------------------------
+
   try {
     const response = await fetch(BASE_URL, {
       method: 'POST',
@@ -55,6 +65,12 @@ export const createCloudStore = async (apiKey: string, data: SystemData, storeNa
 
 // Read Data
 export const fetchCloudData = async (config: CloudConfig): Promise<SystemData | null> => {
+  // --- LOCAL MODE BYPASS ---
+  if (config.apiKey === 'local') {
+      return null; // Return null to indicate "No cloud data", storageService will use local
+  }
+  // -------------------------
+
   try {
     const response = await fetch(`${BASE_URL}/${config.binId}`, {
       method: 'GET',
@@ -75,6 +91,12 @@ export const fetchCloudData = async (config: CloudConfig): Promise<SystemData | 
 
 // Update Data
 export const updateCloudData = async (config: CloudConfig, data: SystemData): Promise<boolean> => {
+  // --- LOCAL MODE BYPASS ---
+  if (config.apiKey === 'local') {
+      return true; // Pretend we saved it
+  }
+  // -------------------------
+
   try {
     const response = await fetch(`${BASE_URL}/${config.binId}`, {
       method: 'PUT',

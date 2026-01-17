@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, CheckCircle, Clock, User, Sparkles, Loader2, ArrowRight, X, Copy, BarChart2, Users, Settings, Pencil, Calendar, Layers, LogOut, Megaphone, Link as LinkIcon, Share2 } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, User, Sparkles, Loader2, ArrowRight, X, Copy, BarChart2, Users, Settings, Pencil, Calendar, Layers, LogOut, Megaphone, Link as LinkIcon, Share2, Cloud, AlertTriangle, Lock, ShieldCheck } from 'lucide-react';
 import { Task, ChecklistItem, Announcement } from '../types';
 import { generateChecklistWithAI } from '../services/geminiService';
-import { saveTask, deleteTask, getEmployees, saveEmployees, saveAdminPassword, getAdminPassword, getAnnouncements, saveAnnouncement, deleteAnnouncement, getCloudConfig } from '../services/storageService';
-import { encodeCloudConfig } from '../services/cloudService';
+import { saveTask, deleteTask, getEmployees, saveEmployees, saveAdminPassword, getAdminPassword, getAnnouncements, saveAnnouncement, deleteAnnouncement, getCloudConfig, saveCloudConfig, getFullSystemData } from '../services/storageService';
+import { encodeCloudConfig, createCloudStore } from '../services/cloudService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface SupervisorViewProps {
@@ -19,11 +19,19 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
   
+  // First Time Password Set Modal
+  const [isFirstTimeModalOpen, setIsFirstTimeModalOpen] = useState(false);
+  
   const [editingTask, setEditingTask] = useState<Task | undefined>(undefined);
   const [employees, setEmployees] = useState<string[]>([]);
   
   useEffect(() => {
     setEmployees(getEmployees());
+    
+    // Check if password is default 'admin'
+    if (getAdminPassword() === 'admin') {
+        setIsFirstTimeModalOpen(true);
+    }
   }, []);
 
   const handleUpdateEmployees = (newList: string[]) => {
@@ -44,10 +52,15 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
   const copyInviteLink = () => {
     const config = getCloudConfig();
     if (config) {
-        const code = encodeCloudConfig(config);
-        const url = `${window.location.origin}${window.location.pathname}#invite=${code}`;
-        navigator.clipboard.writeText(url);
-        alert("已複製「團隊邀請連結」！\n\n將連結傳到 Line 群組，員工點擊即可加入並同步資料。");
+        if (config.apiKey === 'local') {
+            alert("【需啟用雲端同步】\n\n目前是「單機模式」，連結只能在本機使用。\n\n要產生給員工的連結，請先點擊「設定」並貼上雲端金鑰 (API Key)。");
+            setIsSettingsModalOpen(true);
+        } else {
+            const code = encodeCloudConfig(config);
+            const url = `${window.location.origin}${window.location.pathname}#invite=${code}`;
+            navigator.clipboard.writeText(url);
+            alert("✅ 連結已複製！\n\n請直接貼到 Line 群組，員工點擊後輸入姓名即可加入。");
+        }
     }
   };
 
@@ -70,25 +83,31 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">UniCheck</h1>
           <p className="text-slate-500 mt-1 font-medium flex items-center gap-2">
-            管理後台
+            管理後台 
+            {getCloudConfig()?.apiKey === 'local' && (
+                <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full font-bold">單機模式</span>
+            )}
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
            <button 
              onClick={copyInviteLink}
-             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 transition-all font-bold flex-1 md:flex-none"
+             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 transition-all font-bold flex-1 md:flex-none animate-in fade-in zoom-in duration-500"
            >
               <LinkIcon className="w-4 h-4 mr-2" />
-              複製邀請連結
+              複製員工邀請連結
            </button>
            
            <div className="flex gap-2">
                 <button 
                     onClick={() => setIsSettingsModalOpen(true)}
-                    className="p-3 text-slate-500 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl"
+                    className="p-3 text-slate-500 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-xl relative"
                     title="設定"
                 >
                     <Settings className="w-5 h-5" />
+                    {getCloudConfig()?.apiKey === 'local' && (
+                         <span className="absolute top-2 right-2 w-2 h-2 bg-amber-500 rounded-full animate-pulse"></span>
+                    )}
                 </button>
                 <button 
                     onClick={() => setIsAnnouncementModalOpen(true)}
@@ -277,6 +296,10 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
           onClose={() => setIsSettingsModalOpen(false)}
         />
       )}
+
+      {isFirstTimeModalOpen && (
+        <FirstTimePasswordModal onClose={() => setIsFirstTimeModalOpen(false)} />
+      )}
     </div>
   );
 };
@@ -292,6 +315,49 @@ const MetricCard = ({ icon, label, value, bgColor }: any) => (
     </div>
   </div>
 );
+
+// --- FirstTimePasswordModal ---
+const FirstTimePasswordModal = ({ onClose }: { onClose: () => void }) => {
+    const [pwd, setPwd] = useState('');
+    
+    const handleSave = () => {
+        if (!pwd) return alert("請輸入密碼");
+        saveAdminPassword(pwd);
+        alert("密碼設定完成！下次登入請使用此密碼。");
+        onClose();
+    };
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in duration-300">
+            <div className="bg-indigo-600 p-6 text-white text-center">
+                <ShieldCheck className="w-12 h-12 mx-auto mb-2 opacity-90" />
+                <h2 className="text-xl font-bold">請設定管理員密碼</h2>
+                <p className="text-indigo-100 text-sm mt-1">為了安全，請將預設密碼修改為您的專屬密碼。</p>
+            </div>
+            <div className="p-6 space-y-4">
+                <div className="relative">
+                    <Lock className="absolute left-3 top-3.5 w-5 h-5 text-slate-400" />
+                    <input 
+                        type="text" 
+                        placeholder="請輸入新密碼" 
+                        value={pwd}
+                        onChange={e => setPwd(e.target.value)}
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-lg font-bold"
+                        autoFocus
+                    />
+                </div>
+                <button 
+                    onClick={handleSave}
+                    className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-lg"
+                >
+                    確認設定
+                </button>
+            </div>
+          </div>
+        </div>
+    );
+};
 
 // --- Sub-component: Announcement Modal ---
 const AnnouncementModal = ({ onClose }: { onClose: () => void }) => {
@@ -376,15 +442,46 @@ const AnnouncementModal = ({ onClose }: { onClose: () => void }) => {
 // --- Sub-component: Settings Modal ---
 const SettingsModal = ({ onClose }: { onClose: () => void }) => {
   const [adminPwd, setAdminPwd] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [isLocal, setIsLocal] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setAdminPwd(getAdminPassword());
+    const config = getCloudConfig();
+    if (config) {
+        setIsLocal(config.apiKey === 'local');
+        setApiKey(config.apiKey === 'local' ? '' : config.apiKey);
+    }
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     saveAdminPassword(adminPwd);
-    alert("設定已儲存");
-    onClose();
+    
+    // Upgrade to Cloud
+    if (isLocal && apiKey.trim()) {
+        const confirmUpgrade = confirm("確定要啟用雲端同步嗎？\n\n這將會把目前的資料上傳到雲端，讓其他員工可以同步看到。");
+        if (confirmUpgrade) {
+            setLoading(true);
+            const currentData = getFullSystemData();
+            const config = getCloudConfig();
+            if (config) {
+                // Try create real store with new key
+                const newConfig = await createCloudStore(apiKey.trim(), currentData, config.storeName);
+                if (newConfig) {
+                    saveCloudConfig(newConfig);
+                    alert("雲端同步已啟用！\n現在您可以分享連結給員工了。");
+                    window.location.reload();
+                } else {
+                    alert("連線失敗，請檢查 API Key");
+                }
+            }
+            setLoading(false);
+        }
+    } else {
+        alert("密碼已更新");
+        onClose();
+    }
   };
 
   return (
@@ -395,7 +492,7 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
           <button onClick={onClose}><X className="w-5 h-5 text-slate-400" /></button>
         </div>
         
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-6">
             <div>
                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">管理員密碼</label>
                <input 
@@ -405,11 +502,44 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono tracking-wider"
                />
             </div>
+
+            {/* Cloud Upgrade Section */}
+            <div className={`p-4 rounded-xl border ${isLocal ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                    <Cloud className={`w-5 h-5 ${isLocal ? 'text-amber-600' : 'text-emerald-600'}`} />
+                    <h3 className={`font-bold text-sm ${isLocal ? 'text-amber-800' : 'text-emerald-800'}`}>
+                        {isLocal ? '單機運作中' : '雲端同步中'}
+                    </h3>
+                </div>
+                {isLocal ? (
+                    <div className="space-y-2">
+                        <p className="text-xs text-amber-700">
+                           若要讓員工也能在手機上看到任務，請填入 JSONBin Master Key 以啟用雲端同步。
+                        </p>
+                        <input 
+                            type="text" 
+                            placeholder="在此貼上 API Key 以升級..."
+                            value={apiKey}
+                            onChange={e => setApiKey(e.target.value)}
+                            className="w-full p-2 text-xs bg-white border border-amber-300 rounded font-mono"
+                        />
+                        <div className="text-right">
+                             <a href="https://jsonbin.io/app/keys" target="_blank" className="text-[10px] text-amber-600 underline">取得 Key</a>
+                        </div>
+                    </div>
+                ) : (
+                    <p className="text-xs text-emerald-700">
+                        系統已成功連線至雲端資料庫。
+                    </p>
+                )}
+            </div>
+
             <button 
                 onClick={handleSave}
-                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold"
+                disabled={loading}
+                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 flex justify-center"
             >
-                儲存
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : '儲存設定'}
             </button>
         </div>
       </div>
