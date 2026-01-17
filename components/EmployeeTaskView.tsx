@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Task } from '../types';
 import { uploadPhoto } from '../services/storageService';
 import { CheckSquare, Square, Camera, Send, CheckCircle, X, AlertCircle, Sparkles, Loader2, Download } from 'lucide-react';
@@ -11,7 +11,16 @@ interface EmployeeTaskViewProps {
 export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpdate }) => {
   const [localTask, setLocalTask] = useState<Task>(task);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [isSuccessAnimating, setIsSuccessAnimating] = useState(false);
+
+  // Sync prop changes to local state (Safety net)
+  useEffect(() => {
+    // Only sync if status changed to completed remotely to avoid overwriting local work
+    if (task.status === 'completed' && localTask.status !== 'completed') {
+        setLocalTask(task);
+    }
+  }, [task]);
 
   // Constants
   const MIN_PHOTOS = 3;
@@ -42,6 +51,7 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      setUploadProgress(`${i + 1}/${files.length}`); // Show progress
       try {
         const base64 = await resizeAndConvertToBase64(file);
         const cloudUrl = await uploadPhoto(base64);
@@ -61,6 +71,7 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
       photos: [...prev.photos, ...newPhotos]
     }));
     setUploading(false);
+    setUploadProgress('');
     e.target.value = '';
   };
 
@@ -81,19 +92,27 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
     if (!confirm("確認完成任務並送出？")) return;
 
     setIsSuccessAnimating(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // Reduced delay for snappier feel
+    await new Promise(resolve => setTimeout(resolve, 800));
 
     const completedTask: Task = {
       ...localTask,
       status: 'completed',
       completedAt: Date.now()
     };
+    
+    // 1. Update Parent
     onUpdate(completedTask);
+    
+    // 2. Force Local Update Immediately (Fixes the stuck spinner bug)
+    setLocalTask(completedTask);
+    setIsSuccessAnimating(false);
   };
 
   const handleShare = () => {
     const text = `【任務完成】\n名稱：${localTask.areaName}\n負責人：${localTask.assigneeName}\n\n已完成！請主管使用「資料同步中心」的匯入功能來更新狀態。`;
-    alert("任務已完成！\n\n若主管不在現場，請回到首頁使用「資料同步中心」下載備份檔並傳給主管。");
+    // alert("任務已完成！\n\n若主管不在現場，請回到首頁使用「資料同步中心」下載備份檔並傳給主管。");
     const url = `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
     window.location.href = url;
   };
@@ -183,7 +202,7 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
                 {uploading ? (
                   <span className="text-xs flex flex-col items-center text-slate-500">
                      <Loader2 className="w-6 h-6 mb-2 animate-spin text-emerald-500" />
-                     上傳中...
+                     {uploadProgress ? `上傳中 ${uploadProgress}` : '處理中...'}
                   </span>
                 ) : (
                   <>
@@ -253,6 +272,7 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
 };
 
 // Helper to optimize image before upload (Client-side compression)
+// Optimized for speed: 1024px width, 0.7 quality
 const resizeAndConvertToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -262,7 +282,7 @@ const resizeAndConvertToBase64 = (file: File): Promise<string> => {
       img.src = event.target?.result as string;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1280; // Limit width to 1280px for faster uploads
+        const MAX_WIDTH = 1024; // Optimized from 1280 to 1024 for faster uploads
         
         let width = img.width;
         let height = img.height;
@@ -276,9 +296,13 @@ const resizeAndConvertToBase64 = (file: File): Promise<string> => {
         canvas.height = height;
 
         const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        // Compress to JPEG at 80% quality
-        resolve(canvas.toDataURL('image/jpeg', 0.8));
+        if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            // Compress to JPEG at 70% quality (Good balance for tasks)
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
+        } else {
+            reject(new Error("Canvas context is null"));
+        }
       };
       img.onerror = (error) => reject(error);
     };
