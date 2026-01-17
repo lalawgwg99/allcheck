@@ -5,6 +5,28 @@ const EMPLOYEES_KEY = 'cleancheck_employees_v1';
 const PASSWORD_KEY = 'cleancheck_admin_pwd';
 const ANNOUNCEMENTS_KEY = 'cleancheck_announcements_v1';
 
+// --- URL Data Encoding Helpers (核心功能：網址傳輸資料) ---
+export const encodeData = (data: any): string => {
+  try {
+    const jsonStr = JSON.stringify(data);
+    // 使用 encodeURIComponent 處理中文，再轉 base64，確保網址安全
+    return btoa(encodeURIComponent(jsonStr));
+  } catch (e) {
+    console.error("Encode error", e);
+    return "";
+  }
+};
+
+export const decodeData = (str: string): any => {
+  try {
+    const jsonStr = decodeURIComponent(atob(str));
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error("Decode error", e);
+    return null;
+  }
+};
+
 // --- Local Storage Helpers ---
 export const getEmployees = (): string[] => {
   const data = localStorage.getItem(EMPLOYEES_KEY);
@@ -50,7 +72,7 @@ export const getTaskById = (id: string): Task | undefined => {
 
 // --- Cloudinary Upload Service ---
 export const uploadPhoto = async (base64Data: string): Promise<string> => {
-  // 您的 Cloudinary 設定 (已直接寫入，無需環境變數)
+  // Cloudinary 設定
   const cloudName = 'dlu7qv8oq'; 
   const uploadPreset = 'unicheck'; 
 
@@ -70,10 +92,9 @@ export const uploadPhoto = async (base64Data: string): Promise<string> => {
     }
 
     const data = await response.json();
-    return data.secure_url; // 回傳雲端網址
+    return data.secure_url;
   } catch (error) {
     console.error("Upload Error:", error);
-    // 為了系統穩定，如果上傳失敗則拋出錯誤，避免將巨大的 Base64 存入 LocalStorage 導致系統崩潰
     throw new Error("照片上傳失敗");
   }
 };

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Task } from '../types';
-import { uploadPhoto } from '../services/storageService'; // Import the new upload service
+import { uploadPhoto, encodeData } from '../services/storageService'; // Import encodeData
 import { CheckSquare, Square, Camera, Send, CheckCircle, X, AlertCircle, Sparkles, Loader2 } from 'lucide-react';
 
 interface EmployeeTaskViewProps {
@@ -97,7 +97,12 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
   };
 
   const handleShare = () => {
-    const text = `【任務完成】\n名稱：${localTask.areaName}\n負責人：${localTask.assigneeName}\n\n我已經完成任務並上傳了 ${localTask.photos.length} 張照片。\n查看成果連結：${window.location.origin}${window.location.pathname}#result/${localTask.id}`;
+    // NEW: Encode the full task data (including Cloudinary URLs) into the URL
+    const encodedData = encodeData(localTask);
+    const resultLink = `${window.location.origin}${window.location.pathname}#result?data=${encodedData}`;
+    
+    const text = `【任務完成】\n名稱：${localTask.areaName}\n負責人：${localTask.assigneeName}\n\n我已經完成任務並上傳了 ${localTask.photos.length} 張照片。\n\n👇 點擊連結查看成果 (此連結含完整報告)：\n${resultLink}`;
+    
     const url = `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
     window.location.href = url;
   };

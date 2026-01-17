@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, CheckCircle, Clock, User, Sparkles, Loader2, ArrowRight, X, Copy, BarChart2, Users, Settings, Pencil, CalendarDays, Calendar, Layers, ChevronDown, ChevronUp, Wand2, Share2, Link, LogOut, Megaphone, Bell } from 'lucide-react';
 import { Task, ChecklistItem, Announcement } from '../types';
 import { generateChecklistWithAI } from '../services/geminiService';
-import { saveTask, deleteTask, getEmployees, saveEmployees, saveAdminPassword, getAdminPassword, getAnnouncements, saveAnnouncement, deleteAnnouncement } from '../services/storageService';
+import { saveTask, deleteTask, getEmployees, saveEmployees, saveAdminPassword, getAdminPassword, getAnnouncements, saveAnnouncement, deleteAnnouncement, encodeData } from '../services/storageService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface SupervisorViewProps {
@@ -43,7 +43,7 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
   const copySystemLink = () => {
       const url = window.location.origin + window.location.pathname; // Root URL
       navigator.clipboard.writeText(url);
-      alert("✅ 系統入口連結已複製！\n\n請貼到 LINE 群組，讓員工點擊進入並選擇自己的名字。");
+      alert("✅ 系統入口連結已複製！\n\n此連結僅供員工「進入首頁」使用。\n\n⚠️ 若要派發特定任務，請點擊下方任務列表右側的「複製按鈕」，那樣才會包含任務資料喔！");
   };
   
   // Dashboard Metrics
@@ -91,7 +91,7 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg flex items-center shadow-sm transition-all text-sm font-medium ring-2 ring-emerald-100"
           >
              <Share2 className="w-4 h-4 mr-2" />
-             傳送入口
+             系統入口
           </button>
           
           <button 
@@ -209,12 +209,14 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
                     <div className="flex items-center gap-2">
                       <button 
                         onClick={() => {
-                            const url = `${window.location.origin}${window.location.pathname}#task/${task.id}`;
+                            // NEW: Use encodeData to embed task data into the URL
+                            const encodedData = encodeData(task);
+                            const url = `${window.location.origin}${window.location.pathname}#task?data=${encodedData}`;
                             navigator.clipboard.writeText(url);
-                            alert(`連結已複製：\n${url}`);
+                            alert(`✅ 任務連結已複製！(包含完整任務資料)\n\n請直接貼給「${task.assigneeName}」，他打開後即可看到任務內容。`);
                         }}
-                        className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
-                        title="複製員工任務連結"
+                        className="p-2 text-slate-400 hover:text-white hover:bg-slate-900 rounded-md transition-colors border border-transparent hover:border-slate-800"
+                        title="複製任務連結 (給員工)"
                       >
                         <Copy className="w-4 h-4" />
                       </button>
@@ -408,7 +410,7 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
        return;
     }
     saveAdminPassword(password.trim());
-    alert("密碼已更新！下次登入請使用新密碼。");
+    alert("密碼已更新！\n\n注意：密碼僅儲存於「此瀏覽器」。若更換裝置，請重新設定。");
     onClose();
   };
 
@@ -429,7 +431,10 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
                value={password}
                onChange={e => setPassword(e.target.value)}
             />
-            <p className="text-xs text-slate-400 mt-2">請妥善保管密碼。</p>
+            <p className="text-xs text-amber-600 mt-2 flex items-start gap-1">
+              <span className="font-bold">⚠️ 注意：</span>
+              密碼僅保存在這台裝置。換手機或電腦時，預設密碼仍為 0000。
+            </p>
          </div>
 
          <button 
