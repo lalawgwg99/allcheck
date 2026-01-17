@@ -1,0 +1,7 @@
+{
+  "name": "UniCheck - 萬用任務驗收系統",
+  "description": "管理者派發各類任務，AI 輔助生成執行重點，員工回報驗收並分享成果。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
