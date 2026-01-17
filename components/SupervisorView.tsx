@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, CheckCircle, Clock, User, Sparkles, Loader2, ArrowRight, X, Copy, BarChart2, Users, Settings, Pencil, CalendarDays, Calendar, Layers, ChevronDown, ChevronUp, Wand2, Share2, Link, LogOut, Megaphone, Bell } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, Clock, User, Sparkles, Loader2, ArrowRight, X, Copy, BarChart2, Users, Settings, Pencil, CalendarDays, Calendar, Layers, ChevronDown, ChevronUp, Wand2, Share2, Link, LogOut, Megaphone, Bell, RefreshCw } from 'lucide-react';
 import { Task, ChecklistItem, Announcement } from '../types';
 import { generateChecklistWithAI } from '../services/geminiService';
-import { saveTask, deleteTask, getEmployees, saveEmployees, saveAdminPassword, getAdminPassword, getAnnouncements, saveAnnouncement, deleteAnnouncement, encodeData } from '../services/storageService';
+import { saveTask, deleteTask, getEmployees, saveEmployees, saveAdminPassword, getAdminPassword, getAnnouncements, saveAnnouncement, deleteAnnouncement } from '../services/storageService';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 interface SupervisorViewProps {
@@ -40,12 +40,6 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
     setIsTaskModalOpen(true);
   };
 
-  const copySystemLink = () => {
-      const url = window.location.origin + window.location.pathname; // Root URL
-      navigator.clipboard.writeText(url);
-      alert("✅ 系統入口連結已複製！\n\n此連結僅供員工「進入首頁」使用。\n\n⚠️ 若要派發特定任務，請點擊下方任務列表右側的「複製按鈕」，那樣才會包含任務資料喔！");
-  };
-  
   // Dashboard Metrics
   const completedCount = tasks.filter(t => t.status === 'completed').length;
   const pendingCount = tasks.filter(t => t.status === 'pending').length;
@@ -63,8 +57,8 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
       {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">UniCheck</h1>
-          <p className="text-slate-500 mt-1">萬用任務驗收系統 - 管理後台</p>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">UniCheck</h1>
+          <p className="text-slate-500 mt-1 font-medium">萬用任務驗收系統 - 管理後台</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
            {/* Settings Button */}
@@ -87,11 +81,16 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
            <div className="w-px h-6 bg-slate-200 hidden md:block mx-1"></div>
 
           <button 
-             onClick={copySystemLink}
-             className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg flex items-center shadow-sm transition-all text-sm font-medium ring-2 ring-emerald-100"
+            onClick={() => {
+                // Return to portal but trigger sync modal? 
+                // Currently just logout to portal where sync is available.
+                alert("請回到首頁 (登出後) 使用「資料同步中心」來匯出指派代碼或備份檔。");
+                window.location.hash = '#portal';
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center shadow-sm transition-all text-sm font-bold ring-2 ring-indigo-100"
           >
-             <Share2 className="w-4 h-4 mr-2" />
-             系統入口
+             <RefreshCw className="w-4 h-4 mr-2" />
+             同步/派發資料
           </button>
           
           <button 
@@ -207,20 +206,6 @@ export const SupervisorView: React.FC<SupervisorViewProps> = ({ tasks, refreshTa
                     </div>
                     
                     <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => {
-                            // NEW: Use encodeData to embed task data into the URL
-                            const encodedData = encodeData(task);
-                            const url = `${window.location.origin}${window.location.pathname}#task?data=${encodedData}`;
-                            navigator.clipboard.writeText(url);
-                            alert(`✅ 任務連結已複製！(包含完整任務資料)\n\n請直接貼給「${task.assigneeName}」，他打開後即可看到任務內容。`);
-                        }}
-                        className="p-2 text-slate-400 hover:text-white hover:bg-slate-900 rounded-md transition-colors border border-transparent hover:border-slate-800"
-                        title="複製任務連結 (給員工)"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-
                       <button 
                         onClick={() => handleEditTask(task)}
                         className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
@@ -576,10 +561,6 @@ const BatchTaskModal = ({ employees, onClose, onSaved }: { employees: string[], 
   const handleSaveAll = () => {
     selectedEmps.forEach(emp => {
       const detail = taskDetails[emp];
-      // Validation skip: if checklist is empty, maybe skip or alert? 
-      // Requirement said 3-8 items. We will enforce loose validation or just save what we have.
-      // Let's create the task.
-      
       const newTask: Task = {
         id: crypto.randomUUID(),
         assigneeName: emp,
@@ -839,9 +820,6 @@ const BatchTaskModal = ({ employees, onClose, onSaved }: { employees: string[], 
                    onClick={() => {
                       if(!masterTitle.trim()) { alert('請輸入任務目標'); return; }
                       if(selectedEmps.length === 0) { alert('請至少選擇一位員工'); return; }
-                      if(masterChecklist.length === 0) {
-                         // Soft warn or auto-gen? Let's just encourage gen, but allow proceed if manual entry planned
-                      }
                       initializeDetails();
                    }}
                    className="w-full bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 flex justify-center items-center"
@@ -878,7 +856,6 @@ const TaskFormModal = ({ employees, initialData, onClose, onSaved }: { employees
   const [areaName, setAreaName] = useState(initialData?.areaName || '');
   const [checklist, setChecklist] = useState<string[]>(initialData?.checklist.map(i => i.text) || []);
   
-  // Date states
   const today = new Date().toISOString().split('T')[0];
   const [startDate, setStartDate] = useState(
       initialData?.startDate 
@@ -932,7 +909,6 @@ const TaskFormModal = ({ employees, initialData, onClose, onSaved }: { employees
       createdAt: initialData?.createdAt || Date.now()
     };
     
-    // Preserve completion status if text matches during edit
     if (initialData) {
         taskData.checklist = checklist.map(text => {
             const existing = initialData.checklist.find(c => c.text === text);
@@ -1025,7 +1001,6 @@ const TaskFormModal = ({ employees, initialData, onClose, onSaved }: { employees
                     )}
                   </button>
                   
-                  {/* If we have checklist data (e.g. editing), allow going next without regenerating */}
                   {(checklist.length > 0 || isEditing) && (
                       <button 
                         onClick={handleNext}

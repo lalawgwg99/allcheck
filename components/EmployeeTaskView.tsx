@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Task } from '../types';
-import { uploadPhoto, encodeData } from '../services/storageService'; // Import encodeData
-import { CheckSquare, Square, Camera, Send, CheckCircle, X, AlertCircle, Sparkles, Loader2 } from 'lucide-react';
+import { uploadPhoto } from '../services/storageService';
+import { CheckSquare, Square, Camera, Send, CheckCircle, X, AlertCircle, Sparkles, Loader2, Download } from 'lucide-react';
 
 interface EmployeeTaskViewProps {
   task: Task;
@@ -40,13 +40,10 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
     const newPhotos: string[] = [];
     let errorCount = 0;
 
-    // Process uploads sequentially to avoid overwhelming the network
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        // 1. Resize locally first
         const base64 = await resizeAndConvertToBase64(file);
-        // 2. Upload to Cloudinary
         const cloudUrl = await uploadPhoto(base64);
         newPhotos.push(cloudUrl);
       } catch (err) {
@@ -64,8 +61,6 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
       photos: [...prev.photos, ...newPhotos]
     }));
     setUploading(false);
-    
-    // Clear input value to allow selecting same file again if needed
     e.target.value = '';
   };
 
@@ -97,12 +92,8 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
   };
 
   const handleShare = () => {
-    // NEW: Encode the full task data (including Cloudinary URLs) into the URL
-    const encodedData = encodeData(localTask);
-    const resultLink = `${window.location.origin}${window.location.pathname}#result?data=${encodedData}`;
-    
-    const text = `【任務完成】\n名稱：${localTask.areaName}\n負責人：${localTask.assigneeName}\n\n我已經完成任務並上傳了 ${localTask.photos.length} 張照片。\n\n👇 點擊連結查看成果 (此連結含完整報告)：\n${resultLink}`;
-    
+    const text = `【任務完成】\n名稱：${localTask.areaName}\n負責人：${localTask.assigneeName}\n\n已完成！請主管使用「資料同步中心」的匯入功能來更新狀態。`;
+    alert("任務已完成！\n\n若主管不在現場，請回到首頁使用「資料同步中心」下載備份檔並傳給主管。");
     const url = `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
     window.location.href = url;
   };
@@ -112,24 +103,17 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
   return (
     <div className="max-w-xl mx-auto min-h-screen bg-white pb-20">
       {/* Top Bar */}
-      <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 z-10 px-6 py-4">
-         <div className="flex justify-between items-start mb-2">
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-                <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">Task #{localTask.id.slice(0,4)}</span>
-            </div>
-            {localTask.dueDate && (
-                <div className={`flex items-center gap-1 text-sm font-medium ${isOverdue ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded' : 'text-slate-500'}`}>
-                    {isOverdue && <AlertCircle className="w-4 h-4" />}
-                    <span>截止：{new Date(localTask.dueDate).toLocaleDateString()}</span>
-                </div>
-            )}
+      <div className="sticky top-0 bg-white/90 backdrop-blur-sm border-b border-slate-100 z-10 px-6 py-4 flex justify-between items-center">
+         <div>
+             <h1 className="text-xl font-bold text-slate-900 truncate max-w-[200px]">{localTask.areaName}</h1>
+             <p className="text-xs text-slate-500">負責人：{localTask.assigneeName}</p>
          </div>
-         <h1 className="text-2xl font-bold text-slate-900">{localTask.areaName}</h1>
-         <p className="text-slate-500">負責人：{localTask.assigneeName}</p>
+         <button onClick={() => window.location.hash = '#portal'} className="text-slate-400 hover:text-slate-600">
+            <X className="w-6 h-6" />
+         </button>
       </div>
 
       <div className="p-6 space-y-8">
-        
         {/* Checklist Section */}
         <section>
           <h2 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4 flex justify-between items-center">
@@ -234,7 +218,7 @@ export const EmployeeTaskView: React.FC<EmployeeTaskViewProps> = ({ task, onUpda
                 className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-green-100 flex items-center justify-center transition-all hover:scale-[1.02]"
               >
                 <Send className="w-5 h-5 mr-2" />
-                分享至 LINE 群組
+                通知主管
               </button>
             </div>
           ) : (
