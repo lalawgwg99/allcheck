@@ -1,9 +1,10 @@
 import { Task, DEFAULT_EMPLOYEES, Announcement, CloudConfig } from '../types';
-import { updateCloudData, fetchCloudData } from './cloudService';
+import { updateCloudData, fetchCloudData, decodeCloudConfig } from './cloudService';
 
 const STORAGE_KEY = 'cleancheck_tasks_v1';
 const EMPLOYEES_KEY = 'cleancheck_employees_v1';
 const PASSWORD_KEY = 'cleancheck_admin_pwd';
+const ACCESS_CODE_KEY = 'cleancheck_access_code';
 const ANNOUNCEMENTS_KEY = 'cleancheck_announcements_v1';
 const CLOUD_CONFIG_KEY = 'cleancheck_cloud_config';
 
@@ -13,6 +14,7 @@ export interface SystemData {
   employees: string[];
   announcements: Announcement[];
   adminPassword?: string;
+  accessCode?: string;
   updatedAt: number;
 }
 
@@ -29,15 +31,13 @@ export const getCloudConfig = (): CloudConfig | null => {
 
 export const saveCloudConfig = (config: CloudConfig): void => {
   localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(config));
-  // Restart sync when config changes
   startAutoSync();
 };
 
 export const clearCloudConfig = (): void => {
   stopAutoSync();
   localStorage.removeItem(CLOUD_CONFIG_KEY);
-  // Optional: Clear local data on logout for security? 
-  // For now, keep local cache for offline viewing, but functionality will be limited.
+  localStorage.removeItem(ACCESS_CODE_KEY);
 };
 
 // --- Core Data Access ---
@@ -48,21 +48,18 @@ export const getFullSystemData = (): SystemData => {
     employees: getEmployees(),
     announcements: getAnnouncements(),
     adminPassword: getAdminPassword(),
+    accessCode: getAccessCode(),
     updatedAt: Date.now()
   };
 };
 
-// --- SYNC ENGINE (The Heart of Stability) ---
+// --- SYNC ENGINE ---
 
 export const startAutoSync = () => {
   if (syncInterval) clearInterval(syncInterval);
-  
-  // Initial sync
-  syncFromCloud();
-
-  // Poll every 10 seconds
+  syncFromCloud(); // Initial sync
   syncInterval = setInterval(() => {
-    syncFromCloud(true); // silent sync
+    syncFromCloud(true);
   }, 10000);
 };
 
@@ -71,8 +68,6 @@ export const stopAutoSync = () => {
   syncInterval = null;
 };
 
-// FORCE SYNC: Pulls from cloud and updates local
-// silent = true means don't throw errors to UI, just log
 export const syncFromCloud = async (silent = false): Promise<boolean> => {
   const config = getCloudConfig();
   if (!config) return false;
@@ -83,25 +78,14 @@ export const syncFromCloud = async (silent = false): Promise<boolean> => {
     const cloudData = await fetchCloudData(config);
     
     if (cloudData) {
-      // Logic: Only update local if cloud data is newer or different
-      // For simplicity in this version: Cloud is Truth. Always overwrite local with Cloud.
-      // This ensures consistency across all devices.
-      
-      const currentLocal = getFullSystemData();
-      
-      // Optimization: Simple check if update is needed (compare timestamps if available, or length)
-      // In a real DB we use sophisticated diffing. Here we just save.
-      
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData.tasks || []));
       localStorage.setItem(EMPLOYEES_KEY, JSON.stringify(cloudData.employees || []));
       localStorage.setItem(ANNOUNCEMENTS_KEY, JSON.stringify(cloudData.announcements || []));
       if (cloudData.adminPassword) localStorage.setItem(PASSWORD_KEY, cloudData.adminPassword);
+      if (cloudData.accessCode) localStorage.setItem(ACCESS_CODE_KEY, cloudData.accessCode);
       
       lastSyncTime = Date.now();
-      
-      // Dispatch event to notify React components to re-render
       window.dispatchEvent(new Event('storage')); 
-      
       return true;
     }
     return false;
@@ -113,27 +97,23 @@ export const syncFromCloud = async (silent = false): Promise<boolean> => {
   }
 };
 
-// PUSH SYNC: Saves to local, then IMMEDIATELY pushes to cloud
 const persistData = async (data: SystemData) => {
-  // 1. Save Local (Optimistic UI Update)
+  // Save Local
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data.tasks));
   localStorage.setItem(EMPLOYEES_KEY, JSON.stringify(data.employees));
   localStorage.setItem(ANNOUNCEMENTS_KEY, JSON.stringify(data.announcements));
   if (data.adminPassword) localStorage.setItem(PASSWORD_KEY, data.adminPassword);
+  if (data.accessCode) localStorage.setItem(ACCESS_CODE_KEY, data.accessCode);
 
-  // Dispatch event so UI updates immediately
   window.dispatchEvent(new Event('storage'));
 
-  // 2. Push to Cloud
+  // Push Cloud
   const cloudConfig = getCloudConfig();
   if (cloudConfig) {
     try {
         await updateCloudData(cloudConfig, data);
     } catch (e) {
         console.error("Failed to push to cloud", e);
-        // In a more complex app, we would mark this as "dirty" and retry later.
-        // For this version, we rely on the next interaction or manual refresh.
-        alert("⚠️ 網路連線不穩，資料可能尚未同步到雲端，請檢查網路。");
     }
   }
 };
@@ -153,6 +133,10 @@ export const getAdminPassword = (): string => {
   return localStorage.getItem(PASSWORD_KEY) || '0000';
 };
 
+export const getAccessCode = (): string => {
+  return localStorage.getItem(ACCESS_CODE_KEY) || '1111'; // Default team password
+};
+
 export const getAnnouncements = (): Announcement[] => {
   const data = localStorage.getItem(ANNOUNCEMENTS_KEY);
   return data ? JSON.parse(data) : [];
@@ -162,7 +146,7 @@ export const getTaskById = (id: string): Task | undefined => {
   return getTasks().find(t => t.id === id);
 };
 
-// --- Setters (Trigger Sync) ---
+// --- Setters ---
 export const saveEmployees = (employees: string[]): void => {
   const current = getFullSystemData();
   persistData({ ...current, employees });
@@ -189,6 +173,11 @@ export const saveAdminPassword = (pwd: string): void => {
   persistData({ ...current, adminPassword: pwd });
 };
 
+export const saveAccessCode = (code: string): void => {
+  const current = getFullSystemData();
+  persistData({ ...current, accessCode: code });
+};
+
 export const saveAnnouncement = (announcement: Announcement): void => {
   const current = getFullSystemData();
   const list = [announcement, ...current.announcements];
@@ -200,6 +189,23 @@ export const deleteAnnouncement = (id: string): void => {
   const list = current.announcements.filter(a => a.id !== id);
   persistData({ ...current, announcements: list });
 };
+
+// --- Helpers ---
+export const tryProcessInviteLink = async (): Promise<boolean> => {
+    const hash = window.location.hash;
+    if (hash.startsWith('#invite=')) {
+        const code = hash.replace('#invite=', '');
+        const config = decodeCloudConfig(code);
+        if (config) {
+            saveCloudConfig(config);
+            // Must wait for sync to ensure new device has data
+            await syncFromCloud();
+            window.location.hash = ''; // Clear hash to enter lobby
+            return true;
+        }
+    }
+    return false;
+}
 
 // --- Cloudinary ---
 export const uploadPhoto = async (base64Data: string): Promise<string> => {
