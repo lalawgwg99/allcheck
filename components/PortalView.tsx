@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { User, ShieldCheck, ArrowRight, CheckCircle, Clock, ChevronRight, LogOut, AlertTriangle, Lock, Search, Megaphone, X, Bell, RefreshCw, Upload, Download, FileJson, Copy, Check } from 'lucide-react';
+import { User, ShieldCheck, ArrowRight, CheckCircle, Clock, ChevronRight, LogOut, Lock, Megaphone, X, Store, CloudLightning, Loader2, KeyRound, Copy, Check } from 'lucide-react';
 import { Task, Announcement } from '../types';
-import { getAdminPassword, getAnnouncements, exportSystemData, importSystemData, parseSystemCode, exportAssignmentCode } from '../services/storageService';
+import { getAdminPassword, getAnnouncements, getCloudConfig, saveCloudConfig, syncFromCloud, getFullSystemData, clearCloudConfig } from '../services/storageService';
+import { createCloudStore, encodeCloudConfig, decodeCloudConfig } from '../services/cloudService';
 
 interface PortalViewProps {
   tasks: Task[];
@@ -11,29 +12,46 @@ interface PortalViewProps {
 const STORAGE_KEY_LAST_EMP = 'cleancheck_last_employee';
 
 export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
-  const [role, setRole] = useState<'selection' | 'employee' | 'supervisor'>('selection');
+  const [role, setRole] = useState<'login' | 'employee' | 'supervisor'>('login');
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
   
+  // Cloud State
+  const [isConnected, setIsConnected] = useState(false);
+  const [storeName, setStoreName] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+
   // Modals
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [showSyncModal, setShowSyncModal] = useState(false);
   
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
-  // Sync State
-  const [importCode, setImportCode] = useState('');
-  const [syncMessage, setSyncMessage] = useState('');
-
+  // Init
   useEffect(() => {
+    // Check Cloud Connection
+    const config = getCloudConfig();
+    if (config) {
+      setIsConnected(true);
+      setStoreName(config.storeName || '我的店鋪');
+    }
+
+    // Check Last Employee
     const lastEmp = localStorage.getItem(STORAGE_KEY_LAST_EMP);
     if (lastEmp && employees.includes(lastEmp)) {
       setRole('employee');
       setSelectedEmployee(lastEmp);
     }
+
     setAnnouncements(getAnnouncements());
-  }, [employees]);
+  }, [employees]); 
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    await syncFromCloud();
+    setIsSyncing(false);
+    setAnnouncements(getAnnouncements());
+  };
 
   const handleSelectEmployee = (emp: string) => {
     localStorage.setItem(STORAGE_KEY_LAST_EMP, emp);
@@ -44,8 +62,17 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
   const handleLogout = () => {
     localStorage.removeItem(STORAGE_KEY_LAST_EMP);
     setSelectedEmployee(null);
-    setRole('selection');
+    setRole('login');
   };
+
+  const handleStoreLogout = () => {
+    if(confirm("確定要登出店鋪嗎？\n登出後需要重新輸入「店鋪連線碼」才能登入。")) {
+        clearCloudConfig();
+        setIsConnected(false);
+        setStoreName('');
+        window.location.reload();
+    }
+  }
 
   const verifyPassword = () => {
     const correctPassword = getAdminPassword();
@@ -59,14 +86,13 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
   const employeeTasks = selectedEmployee 
     ? tasks.filter(t => t.assigneeName === selectedEmployee).sort((a, b) => b.createdAt - a.createdAt)
     : [];
-
   const pendingTasks = employeeTasks.filter(t => t.status === 'pending');
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Announcement Banner */}
-      {announcements.length > 0 && (
-         <div className="bg-blue-600 text-white px-4 py-2 shadow-sm relative overflow-hidden z-10">
+      {announcements.length > 0 && isConnected && (
+         <div className="bg-blue-600 text-white px-4 py-2 shadow-sm relative overflow-hidden z-10 animate-in slide-in-from-top duration-500">
             <div className="max-w-xl mx-auto flex items-center gap-3">
                <Megaphone className="w-4 h-4 shrink-0 animate-pulse" />
                <div className="text-sm font-medium truncate flex-1">
@@ -76,10 +102,10 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
          </div>
       )}
 
-      {/* Main Container */}
       <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 w-full max-w-lg mx-auto">
         
-        {role === 'selection' && (
+        {/* VIEW: LOGIN / SELECTION */}
+        {role === 'login' && (
           <div className="w-full space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             
             {/* Logo Section */}
@@ -88,389 +114,355 @@ export const PortalView: React.FC<PortalViewProps> = ({ tasks, employees }) => {
                 <ShieldCheck className="w-10 h-10" />
               </div>
               <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">UniCheck</h1>
-              <p className="text-slate-500 font-medium">請選擇您的身份進入系統</p>
+              {isConnected && (
+                  <div className="flex items-center justify-center gap-2 mt-2">
+                    <button 
+                      onClick={handleSync}
+                      className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-200 transition-colors"
+                    >
+                        <Store className="w-3 h-3 mr-1" />
+                        {storeName} {isSyncing ? '(同步中...)' : '(已連線)'}
+                    </button>
+                    <button onClick={handleStoreLogout} className="text-xs text-slate-400 hover:text-red-500 underline">
+                        登出
+                    </button>
+                  </div>
+              )}
             </div>
 
-            {/* Role Cards */}
-            <div className="grid gap-4">
-              {/* Employee Card */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all">
-                 <h2 className="text-lg font-bold text-slate-900 flex items-center mb-4">
-                    <User className="w-5 h-5 mr-2 text-indigo-500"/> 
-                    我是員工 (Employee)
-                 </h2>
-                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {employees.length === 0 ? (
-                        <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                           <p className="text-slate-400 text-sm mb-2">尚無員工資料</p>
-                           <button 
-                             onClick={() => setShowSyncModal(true)}
-                             className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-full font-bold hover:bg-indigo-100 transition-colors"
-                           >
-                              按此匯入資料
-                           </button>
+            {/* Connection View (If not connected) */}
+            {!isConnected ? (
+              <StoreLoginForm onConnected={() => setIsConnected(true)} />
+            ) : (
+              /* Logged In View */
+              <>
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                   <h2 className="text-lg font-bold text-slate-900 flex items-center mb-4 justify-between">
+                      <span className="flex items-center"><User className="w-5 h-5 mr-2 text-slate-500"/> 選擇員工登入</span>
+                      <button onClick={handleSync} className="p-1 text-slate-400 hover:text-indigo-600" title="手動同步">
+                         <CloudLightning className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                      </button>
+                   </h2>
+                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {employees.length === 0 ? (
+                        <div className="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                           尚無員工資料<br/>請主管登入後台新增
                         </div>
-                    ) : (
+                      ) : (
                         employees.map(emp => (
-                            <button
-                                key={emp}
-                                onClick={() => handleSelectEmployee(emp)}
-                                className="w-full flex items-center justify-between p-3.5 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50 transition-all group bg-slate-50/50 text-left"
-                            >
-                                <span className="font-bold text-slate-700 group-hover:text-indigo-900">{emp}</span>
-                                <div className="flex items-center">
-                                  {tasks.filter(t => t.assigneeName === emp && t.status === 'pending').length > 0 && (
-                                    <span className="bg-amber-100 text-amber-700 text-xs px-2 py-0.5 rounded-full mr-2 font-bold">
-                                      {tasks.filter(t => t.assigneeName === emp && t.status === 'pending').length} 待辦
-                                    </span>
-                                  )}
-                                  <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors" />
-                                </div>
-                            </button>
+                          <button
+                            key={emp}
+                            onClick={() => handleSelectEmployee(emp)}
+                            className="w-full text-left px-4 py-3 rounded-xl bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 font-medium text-slate-700 transition-all flex justify-between items-center group"
+                          >
+                            <span>{emp}</span>
+                            <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </button>
                         ))
-                    )}
-                 </div>
-              </div>
+                      )}
+                   </div>
+                </div>
 
-              {/* Supervisor Button */}
-              <button 
-                onClick={() => {
-                  setShowPasswordModal(true);
-                  setPasswordInput('');
-                  setPasswordError(false);
-                }}
-                className="w-full bg-white text-slate-600 font-bold py-4 rounded-2xl border border-slate-200 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center justify-center gap-2"
-              >
-                <Lock className="w-4 h-4" />
-                主管後台登入
-              </button>
-            </div>
-
-            {/* Sync Footer */}
-            <div className="pt-4 border-t border-slate-200/60 flex justify-center">
-               <button 
-                  onClick={() => setShowSyncModal(true)}
-                  className="text-sm text-slate-400 hover:text-indigo-600 flex items-center gap-2 transition-colors px-4 py-2 rounded-full hover:bg-indigo-50"
-               >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  資料同步中心 (匯入/匯出)
-               </button>
-            </div>
+                <div className="text-center">
+                  <button 
+                    onClick={() => setShowPasswordModal(true)}
+                    className="text-sm font-semibold text-slate-400 hover:text-slate-800 transition-colors flex items-center justify-center gap-2 w-full py-4"
+                  >
+                    <Lock className="w-3 h-3" />
+                    我是主管 (進入管理後台)
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {role === 'employee' && selectedEmployee && (
-           <div className="w-full space-y-6 animate-in fade-in duration-500">
-              {/* Employee Header */}
-              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex items-center justify-between">
-                 <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-200">
-                        {selectedEmployee.slice(0,1)}
-                    </div>
-                    <div>
-                        <h2 className="text-xl font-bold text-slate-900">早安，{selectedEmployee}</h2>
-                        <p className="text-sm text-slate-500">
-                           今日待辦：<span className="text-amber-600 font-bold text-lg">{pendingTasks.length}</span>
-                        </p>
-                    </div>
+        {/* VIEW: EMPLOYEE DASHBOARD */}
+        {role === 'employee' && (
+           <div className="w-full h-full flex flex-col animate-in fade-in zoom-in duration-300">
+              <div className="flex items-center justify-between mb-6">
+                 <div>
+                    <h1 className="text-2xl font-bold text-slate-900">早安，{selectedEmployee}</h1>
+                    <p className="text-slate-500 text-sm">今日還有 {pendingTasks.length} 項任務待完成</p>
                  </div>
-                 <button onClick={handleLogout} className="p-2.5 text-slate-400 hover:text-red-500 rounded-xl hover:bg-red-50 transition-colors">
+                 <button onClick={handleLogout} className="p-2 bg-white rounded-full shadow-sm text-slate-400 hover:text-slate-700">
                     <LogOut className="w-5 h-5" />
                  </button>
               </div>
 
-              {/* Task List */}
-              <div className="space-y-3">
-                  {pendingTasks.length === 0 ? (
-                    <div className="text-center py-12">
-                       <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                          <CheckCircle className="w-10 h-10 text-emerald-400" />
-                       </div>
-                       <h3 className="text-lg font-bold text-slate-900">目前沒有待辦任務</h3>
-                       <p className="text-slate-500 text-sm mt-1">請確認是否需要「同步資料」</p>
-                       <button 
-                          onClick={() => setShowSyncModal(true)}
-                          className="mt-4 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-sm font-medium shadow-sm hover:bg-slate-50"
-                       >
-                          同步最新任務
-                       </button>
+              <div className="space-y-4 flex-1 overflow-y-auto pb-20">
+                 {pendingTasks.length === 0 && employeeTasks.length > 0 && (
+                    <div className="bg-emerald-50 text-emerald-800 p-6 rounded-2xl flex flex-col items-center justify-center text-center">
+                       <CheckCircle className="w-12 h-12 mb-3 text-emerald-500" />
+                       <div className="font-bold text-lg">太棒了！</div>
+                       <div className="text-sm opacity-80">所有指派任務都已完成</div>
                     </div>
-                  ) : (
-                    pendingTasks.map(task => (
-                        <div 
-                          key={task.id}
-                          onClick={() => window.location.hash = `#task/${task.id}`}
-                          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group relative overflow-hidden"
-                        >
-                          <div className="absolute left-0 top-0 w-1.5 h-full bg-amber-400 group-hover:bg-indigo-500 transition-colors"></div>
-                          <div className="flex justify-between items-center pl-2">
-                              <div>
-                                <h4 className="font-bold text-lg text-slate-900 mb-1">{task.areaName}</h4>
-                                <div className="flex items-center gap-3 text-xs font-medium text-slate-500">
-                                    <span className="flex items-center bg-slate-100 px-2 py-0.5 rounded">
-                                      <CheckCircle className="w-3 h-3 mr-1" />
-                                      {task.checklist.length} 重點
-                                    </span>
-                                    {task.dueDate && (
-                                      <span className={`flex items-center px-2 py-0.5 rounded ${Date.now() > task.dueDate ? 'bg-red-50 text-red-600' : 'bg-slate-100'}`}>
-                                          <Clock className="w-3 h-3 mr-1" />
-                                          {new Date(task.dueDate).toLocaleDateString()}
-                                      </span>
-                                    )}
+                 )}
+
+                 {employeeTasks.length === 0 && (
+                    <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400">
+                       目前沒有指派給您的任務
+                    </div>
+                 )}
+
+                 {employeeTasks.map(task => {
+                    const isCompleted = task.status === 'completed';
+                    const isOverdue = !isCompleted && task.dueDate && Date.now() > task.dueDate;
+                    
+                    return (
+                       <div 
+                         key={task.id}
+                         onClick={() => {
+                            if (isCompleted) {
+                                window.location.hash = `#result/${task.id}`;
+                            } else {
+                                window.location.hash = `#task/${task.id}`;
+                            }
+                         }}
+                         className={`p-5 rounded-2xl border transition-all cursor-pointer shadow-sm active:scale-[0.98]
+                            ${isCompleted ? 'bg-slate-50 border-slate-200 opacity-70' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-md'}
+                         `}
+                       >
+                          <div className="flex justify-between items-start mb-2">
+                             <div className={`px-2 py-1 rounded text-xs font-bold ${isCompleted ? 'bg-emerald-100 text-emerald-700' : isOverdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {isCompleted ? '已完成' : isOverdue ? '已逾期' : '待辦'}
+                             </div>
+                             {task.dueDate && (
+                                <div className="text-xs text-slate-400 flex items-center">
+                                   <Clock className="w-3 h-3 mr-1" />
+                                   {new Date(task.dueDate).toLocaleDateString()}
                                 </div>
-                              </div>
-                              <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors text-slate-400">
-                                <ChevronRight className="w-5 h-5" />
-                              </div>
+                             )}
                           </div>
-                        </div>
-                    ))
-                  )}
-              </div>
-              
-              {/* Secondary Actions */}
-              <div className="grid grid-cols-2 gap-3 pt-4">
-                  <button 
-                     onClick={() => window.location.hash = '#dashboard'} // Employee can technically view dashboard read-only if no pwd, but let's restrict in real app. For now, link to dashboard requires password.
-                     onClickCapture={(e) => { e.preventDefault(); setShowSyncModal(true); }}
-                     className="py-3 px-4 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-bold shadow-sm hover:bg-slate-50 flex items-center justify-center gap-2"
-                  >
-                     <RefreshCw className="w-4 h-4" />
-                     同步/回報資料
-                  </button>
-                  <button 
-                     className="py-3 px-4 rounded-xl border border-slate-200 bg-slate-100 text-slate-400 text-sm font-bold cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                     歷史紀錄 (開發中)
-                  </button>
+                          <h3 className="text-lg font-bold text-slate-800 mb-1">{task.areaName}</h3>
+                          <div className="flex justify-between items-center text-sm text-slate-500">
+                             <span>{task.checklist.length} 個檢查點</span>
+                             <ChevronRight className="w-4 h-4 text-slate-300" />
+                          </div>
+                       </div>
+                    );
+                 })}
               </div>
            </div>
         )}
+
       </div>
 
-      {/* Sync Modal */}
-      {showSyncModal && (
-        <SyncModal onClose={() => setShowSyncModal(false)} />
-      )}
-
-      {/* Password Modal */}
+      {/* Supervisor Password Modal */}
       {showPasswordModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-6 animate-in fade-in duration-200">
-           <div className="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-8 relative">
-              <button onClick={() => setShowPasswordModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
-                 <X className="w-5 h-5" />
-              </button>
-              <div className="text-center mb-6">
-                 <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Lock className="w-6 h-6 text-slate-700" />
-                 </div>
-                 <h3 className="text-lg font-extrabold text-slate-900">管理者驗證</h3>
-                 <p className="text-xs text-slate-500 mt-1">請輸入管理密碼 (預設: 0000)</p>
-              </div>
-              
-              <div className="space-y-4">
-                 <input 
-                    type="password" 
-                    className={`w-full p-3 bg-slate-50 border rounded-xl text-center text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-slate-900 transition-all font-mono
-                        ${passwordError ? 'border-red-300 bg-red-50 focus:ring-red-200' : 'border-slate-200'}
-                    `}
-                    value={passwordInput}
-                    onChange={(e) => {
-                        setPasswordInput(e.target.value);
-                        setPasswordError(false);
-                    }}
-                    onKeyDown={(e) => e.key === 'Enter' && verifyPassword()}
-                    autoFocus
-                 />
-                 
-                 <button 
-                    onClick={verifyPassword}
-                    className="w-full bg-slate-900 text-white py-3.5 rounded-xl font-bold hover:bg-slate-800 transition-transform active:scale-95 shadow-lg shadow-slate-200"
-                 >
-                    確認登入
+         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+               <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-slate-900">管理者登入</h3>
+                  <button onClick={() => setShowPasswordModal(false)}><X className="w-5 h-5 text-slate-400" /></button>
+               </div>
+               
+               <p className="text-sm text-slate-500 mb-4">請輸入密碼進入後台。</p>
+               
+               <input 
+                  type="password" 
+                  className={`w-full p-3 border rounded-lg focus:outline-none focus:ring-2 mb-4 text-center text-lg tracking-widest ${passwordError ? 'border-red-300 ring-red-100' : 'border-slate-200 ring-slate-100'}`}
+                  placeholder="••••"
+                  autoFocus
+                  value={passwordInput}
+                  onChange={e => {
+                     setPasswordInput(e.target.value);
+                     setPasswordError(false);
+                  }}
+                  onKeyDown={e => e.key === 'Enter' && verifyPassword()}
+               />
+
+               <button 
+                 onClick={verifyPassword}
+                 className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 flex justify-center items-center"
+               >
+                 登入
+               </button>
+               <div className="mt-3 text-center">
+                 <button onClick={() => alert("預設密碼為 0000")} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                    忘記密碼?
                  </button>
-              </div>
-           </div>
-        </div>
+               </div>
+            </div>
+         </div>
       )}
     </div>
   );
 };
 
-// --- SYNC MODAL COMPONENT ---
-const SyncModal = ({ onClose }: { onClose: () => void }) => {
-    const [mode, setMode] = useState<'import' | 'export'>('import');
-    const [importText, setImportText] = useState('');
-    const [statusMsg, setStatusMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
+// --- Store Login / Setup Components ---
 
-    const handleImportCode = () => {
-        if (!importText) return;
-        // Try parsing as system code
-        let data = parseSystemCode(importText);
+const StoreLoginForm: React.FC<{ onConnected: () => void }> = ({ onConnected }) => {
+  const [mode, setMode] = useState<'enter' | 'create'>('enter');
+  const [storeKey, setStoreKey] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Create Mode State
+  const [apiKey, setApiKey] = useState('');
+  const [newStoreName, setNewStoreName] = useState('');
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+
+  const handleConnect = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+        const config = decodeCloudConfig(storeKey.trim());
+        if (!config) throw new Error("無效的連線碼");
         
-        // If not code, maybe it's raw JSON?
-        if (!data) {
-             try { data = JSON.parse(importText); } catch(e) {}
-        }
-
-        if (data) {
-            const result = importSystemData(data);
-            if (result.success) {
-                setStatusMsg({ type: 'success', text: result.message });
-                setTimeout(() => window.location.reload(), 1500);
-            } else {
-                setStatusMsg({ type: 'error', text: result.message });
-            }
+        saveCloudConfig(config);
+        const success = await syncFromCloud();
+        
+        if (success) {
+            onConnected();
         } else {
-            setStatusMsg({ type: 'error', text: "無效的代碼或格式錯誤" });
+            throw new Error("連線失敗，請檢查連線碼是否正確");
         }
-    };
+    } catch (e: any) {
+        setError(e.message || "連線失敗");
+    } finally {
+        setLoading(false);
+    }
+  };
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            try {
-                const json = JSON.parse(event.target?.result as string);
-                const result = importSystemData(json);
-                if (result.success) {
-                    setStatusMsg({ type: 'success', text: result.message });
-                    setTimeout(() => window.location.reload(), 1500);
-                } else {
-                    setStatusMsg({ type: 'error', text: result.message });
-                }
-            } catch (err) {
-                setStatusMsg({ type: 'error', text: "檔案讀取失敗" });
-            }
-        };
-        reader.readAsText(file);
-    };
+  const handleCreate = async () => {
+    if (!apiKey.trim() || !newStoreName.trim()) {
+        setError("請填寫所有欄位");
+        return;
+    }
+    setLoading(true);
+    setError('');
 
-    const handleDownloadBackup = () => {
-        const data = exportSystemData();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `unicheck_backup_${new Date().toISOString().slice(0,10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    };
+    const initialData = getFullSystemData();
+    const config = await createCloudStore(apiKey.trim(), initialData, newStoreName.trim());
 
-    const handleCopyAssignmentCode = () => {
-        const code = exportAssignmentCode();
-        navigator.clipboard.writeText(code);
-        setStatusMsg({ type: 'success', text: "指派代碼已複製！請傳給員工貼上。" });
-    };
+    if (config) {
+        saveCloudConfig(config); // Auto login creator
+        const shareCode = encodeCloudConfig(config);
+        setCreatedKey(shareCode);
+    } else {
+        setError("建立失敗，請檢查 API Key 是否正確 (需有 Master 權限)");
+    }
+    setLoading(false);
+  };
 
-    return (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                    <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                        <RefreshCw className="w-5 h-5 text-indigo-600" /> 資料同步中心
-                    </h3>
-                    <button onClick={onClose} className="p-1 hover:bg-slate-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
-                </div>
-                
-                <div className="flex border-b border-slate-200">
-                    <button 
-                        onClick={() => { setMode('import'); setStatusMsg(null); }}
-                        className={`flex-1 py-3 text-sm font-bold transition-colors ${mode === 'import' ? 'bg-white text-indigo-600 border-b-2 border-indigo-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                    >
-                        匯入資料 (Import)
-                    </button>
-                    <button 
-                        onClick={() => { setMode('export'); setStatusMsg(null); }}
-                        className={`flex-1 py-3 text-sm font-bold transition-colors ${mode === 'export' ? 'bg-white text-indigo-600 border-b-2 border-indigo-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
-                    >
-                        匯出/備份 (Export)
-                    </button>
-                </div>
+  if (createdKey) {
+     return (
+        <div className="bg-white p-6 rounded-2xl border border-emerald-100 shadow-lg animate-in zoom-in duration-300">
+           <div className="flex items-center justify-center w-12 h-12 bg-emerald-100 rounded-full mx-auto mb-4">
+              <Check className="w-6 h-6 text-emerald-600" />
+           </div>
+           <h3 className="text-xl font-bold text-center text-slate-900 mb-2">店鋪建立成功！</h3>
+           <p className="text-sm text-center text-slate-500 mb-6">請務必複製下方的「連線碼」，並分享給所有員工。</p>
+           
+           <div className="bg-slate-100 p-4 rounded-xl break-all font-mono text-xs text-slate-600 border border-slate-200 mb-4 relative group">
+              {createdKey}
+           </div>
+           
+           <button 
+             onClick={() => {
+                navigator.clipboard.writeText(createdKey);
+                alert("已複製連線碼！");
+             }}
+             className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 mb-3"
+           >
+              <Copy className="w-4 h-4" /> 複製連線碼
+           </button>
 
-                <div className="p-6 overflow-y-auto">
-                    {statusMsg && (
-                        <div className={`mb-4 p-3 rounded-xl text-sm font-medium flex items-center gap-2 ${statusMsg.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                            {statusMsg.type === 'success' ? <Check className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-                            {statusMsg.text}
-                        </div>
-                    )}
-
-                    {mode === 'import' ? (
-                        <div className="space-y-6">
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">方法 A：貼上代碼</label>
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="text" 
-                                        className="flex-1 p-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 font-mono text-xs"
-                                        placeholder="貼上主管給的代碼..."
-                                        value={importText}
-                                        onChange={e => setImportText(e.target.value)}
-                                    />
-                                    <button 
-                                        onClick={handleImportCode}
-                                        disabled={!importText}
-                                        className="bg-indigo-600 text-white px-4 rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50"
-                                    >
-                                        匯入
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div className="relative">
-                                <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                                    <div className="w-full border-t border-slate-200"></div>
-                                </div>
-                                <div className="relative flex justify-center">
-                                    <span className="bg-white px-2 text-xs text-slate-400 font-medium">或</span>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">方法 B：上傳備份檔 (.json)</label>
-                                <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-slate-300 border-dashed rounded-2xl cursor-pointer hover:bg-slate-50 transition-colors group">
-                                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                                        <Upload className="w-6 h-6 mb-2 text-slate-400 group-hover:text-indigo-500" />
-                                        <p className="text-xs text-slate-500">點擊選擇檔案</p>
-                                    </div>
-                                    <input type="file" accept=".json" className="hidden" onChange={handleFileUpload} />
-                                </label>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="space-y-6">
-                            <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
-                                <h4 className="font-bold text-indigo-900 mb-1 flex items-center gap-2">
-                                    <Copy className="w-4 h-4" /> 快速指派 (無照片)
-                                </h4>
-                                <p className="text-xs text-indigo-700 mb-3">產生一串輕量代碼，適合透過 LINE 傳給員工同步新任務。</p>
-                                <button 
-                                    onClick={handleCopyAssignmentCode}
-                                    className="w-full bg-white text-indigo-600 border border-indigo-200 py-2 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-colors"
-                                >
-                                    複製指派代碼
-                                </button>
-                            </div>
-
-                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                                <h4 className="font-bold text-slate-900 mb-1 flex items-center gap-2">
-                                    <FileJson className="w-4 h-4" /> 完整系統備份
-                                </h4>
-                                <p className="text-xs text-slate-500 mb-3">下載包含所有任務、照片、員工資料的完整檔案。適合回報成果或備份。</p>
-                                <button 
-                                    onClick={handleDownloadBackup}
-                                    className="w-full bg-slate-900 text-white py-2 rounded-xl text-sm font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
-                                >
-                                    <Download className="w-4 h-4" /> 下載備份檔 (.json)
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
+           <button 
+             onClick={onConnected}
+             className="w-full bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-bold"
+           >
+              進入系統
+           </button>
         </div>
-    );
+     );
+  }
+
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm transition-all">
+       <div className="flex rounded-lg bg-slate-100 p-1 mb-6">
+          <button 
+            onClick={() => setMode('enter')}
+            className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${mode === 'enter' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+          >
+            員工登入
+          </button>
+          <button 
+            onClick={() => setMode('create')}
+            className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${mode === 'create' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+          >
+            建立新店鋪
+          </button>
+       </div>
+
+       {mode === 'enter' ? (
+          <div className="space-y-4">
+             <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">店鋪連線碼</label>
+                <div className="relative">
+                   <KeyRound className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+                   <input 
+                      type="text" 
+                      className="w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="請輸入主管提供的連線碼..."
+                      value={storeKey}
+                      onChange={e => setStoreKey(e.target.value)}
+                   />
+                </div>
+             </div>
+             
+             {error && <div className="text-red-500 text-xs font-medium bg-red-50 p-2 rounded">{error}</div>}
+
+             <button 
+                onClick={handleConnect}
+                disabled={loading || !storeKey}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold shadow-md shadow-indigo-100 flex items-center justify-center disabled:opacity-50"
+             >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : '連線並同步'}
+             </button>
+          </div>
+       ) : (
+          <div className="space-y-4">
+             <div className="bg-amber-50 p-3 rounded-lg border border-amber-100 text-xs text-amber-800">
+                <span className="font-bold block mb-1">💡 首次使用說明</span>
+                本系統使用 JSONBin 免費雲端資料庫。請先至 <a href="https://jsonbin.io/app/keys" target="_blank" className="underline font-bold">jsonbin.io</a> 註冊並取得 Master Key。
+             </div>
+
+             <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">店鋪名稱</label>
+                <input 
+                   type="text" 
+                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                   placeholder="例如：台北站前店"
+                   value={newStoreName}
+                   onChange={e => setNewStoreName(e.target.value)}
+                />
+             </div>
+
+             <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">JSONBin Master Key</label>
+                <input 
+                   type="text" 
+                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 font-mono text-xs"
+                   placeholder="$2a$10$..."
+                   value={apiKey}
+                   onChange={e => setApiKey(e.target.value)}
+                />
+             </div>
+
+             {error && <div className="text-red-500 text-xs font-medium bg-red-50 p-2 rounded">{error}</div>}
+
+             <button 
+                onClick={handleCreate}
+                disabled={loading || !apiKey || !newStoreName}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-bold flex items-center justify-center disabled:opacity-50"
+             >
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : '建立並產生連線碼'}
+             </button>
+          </div>
+       )}
+    </div>
+  );
 };

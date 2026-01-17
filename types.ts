@@ -23,6 +23,12 @@ export interface Announcement {
   createdAt: number;
 }
 
+export interface CloudConfig {
+  binId: string;
+  apiKey: string;
+  storeName: string;
+}
+
 // 預設為空，讓主管自己新增
 export const DEFAULT_EMPLOYEES: string[] = []; 
 

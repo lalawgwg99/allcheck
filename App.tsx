@@ -3,7 +3,7 @@ import { SupervisorView } from './components/SupervisorView';
 import { EmployeeTaskView } from './components/EmployeeTaskView';
 import { ResultView } from './components/ResultView';
 import { PortalView } from './components/PortalView';
-import { getTasks, saveTask, getTaskById, getEmployees } from './services/storageService';
+import { getTasks, saveTask, getTaskById, getEmployees, startAutoSync, stopAutoSync, getCloudConfig } from './services/storageService';
 import { Task } from './types';
 
 const App: React.FC = () => {
@@ -12,17 +12,33 @@ const App: React.FC = () => {
   const [employees, setEmployees] = useState<string[]>([]);
 
   useEffect(() => {
-    // Load data
+    // 1. Initialize Data
     setTasks(getTasks());
     setEmployees(getEmployees());
 
-    // Handle hash change for routing
+    // 2. Start Auto-Sync if config exists
+    if (getCloudConfig()) {
+        startAutoSync();
+    }
+
+    // 3. Listen for Storage Events (triggered by Sync)
+    const handleStorageChange = () => {
+        setTasks(getTasks());
+        setEmployees(getEmployees());
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // 4. Handle Routing
     const handleHashChange = () => {
       setCurrentRoute(window.location.hash);
     };
-
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+
+    return () => {
+        stopAutoSync();
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   const refreshTasks = () => {
@@ -65,7 +81,7 @@ const App: React.FC = () => {
           );
         }
       }
-      return <div className="p-10 text-center text-slate-500">任務不存在。</div>;
+      return <div className="p-10 text-center text-slate-500">任務不存在，可能已被刪除或尚未同步。</div>;
     }
 
     // Result View: #result/taskId
